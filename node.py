@@ -68,6 +68,9 @@ banlist=config.banlist
 global whitelist
 whitelist=config.whitelist
 
+global maxtxlen
+maxtxlen = 100000
+
 def sendsync(sdef,peer_ip,status):
     app_log.warning("Outbound: Synchronization with {} finished after: {}, sending new sync request".format(peer_ip,status))
 
@@ -591,6 +594,7 @@ syncing = []
 # port = 2829 now defined by config
 
 def mempool_merge(data, peer_ip, c, mempool, m):
+    global maxtxlen
     if mem_lock.locked() == False:
         mem_lock.acquire()
 
@@ -617,7 +621,7 @@ def mempool_merge(data, peer_ip, c, mempool, m):
                     mempool_signature_enc = str(transaction[4])[:684]
                     mempool_public_key_hashed = str(transaction[5])[:1068]
                     mempool_keep = str(transaction[6])[:1]
-                    mempool_openfield = str(transaction[7])[:100000]
+                    mempool_openfield = str(transaction[7])[:maxtxlen]
 
                     mempool_public_key = RSA.importKey(base64.b64decode(mempool_public_key_hashed))  # convert readable key to instance
                     mempool_signature_dec = base64.b64decode(mempool_signature_enc)
@@ -1617,6 +1621,7 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
     def handle(self):  # server defined here
         global banlist
         global ban_threshold
+        global maxtxlen
 
         peer_ip = self.request.getpeername()[0]
 
@@ -1694,7 +1699,7 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
                     mempool_merge(segments, peer_ip, c, mempool, m)
                     # receive theirs
 
-                    execute(m, ('SELECT * FROM transactions ORDER BY RANDOM() LIMIT 1')) #merge a random tx, one at a time #PERFORMANCE TEST RESULTS PENDING
+                    execute(m, ('SELECT * FROM transactions WHERE LENGTH(openfield) <= ? ORDER BY RANDOM() LIMIT 1',(maxtxlen,))) #merge a random tx, one at a time #PERFORMANCE TEST RESULTS PENDING
 
                     mempool_txs = m.fetchall()
 
@@ -2038,7 +2043,7 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
                         app_log.info("{} not whitelisted for balanceget command".format(peer_ip))
 
                 elif data == "mpget" and (peer_ip in allowed or "any" in allowed):
-                    execute(m, ('SELECT * FROM transactions'))
+                    execute(m, ('SELECT * FROM transactions WHERE LENGTH(openfield) <= ?',(maxtxlen,)))
                     mempool_txs = m.fetchall()
 
                     # app_log.info("Outbound: Extracted from the mempool: " + str(mempool_txs))  # improve: sync based on signatures only
