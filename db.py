@@ -1,4 +1,4 @@
-import time, random
+import time
 
 def commit(cursor, app_log):
     """Secure commit for slow nodes"""
@@ -8,7 +8,7 @@ def commit(cursor, app_log):
             break
         except Exception as e:
             app_log.warning("Retrying database execute due to {} in {}".format(e, cursor))
-            time.sleep(random.random())
+            time.sleep(3)
 
 
 def execute(cursor, query, app_log):
@@ -20,7 +20,7 @@ def execute(cursor, query, app_log):
         except Exception as e:
             app_log.warning("Database query: {} {}".format(cursor, query))
             app_log.warning("Database retry reason: {}".format(e))
-            time.sleep(random.random())
+            time.sleep(3)
     return cursor
 
 
@@ -34,5 +34,5 @@ def execute_param(cursor, query, param, app_log):
         except Exception as e:
             app_log.warning("Database query: {} {} {}".format(cursor, query, param))
             app_log.warning("Database retry reason: {}".format(e))
-            time.sleep(random.random())
+            time.sleep(3)
     return cursor
