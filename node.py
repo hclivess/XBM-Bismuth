@@ -5,7 +5,7 @@
 # if you have a block of data and want to insert it into sqlite, you must use a single "commit" for the whole batch, it's 100x faster
 # do not isolation_level=None/WAL hdd levels, it makes saving slow
 
-VERSION = "4.2.2.5"
+__version__ = "4.2.2.5"
 
 from itertools import groupby
 from operator import itemgetter
@@ -70,16 +70,14 @@ global whitelist
 whitelist=config.whitelist
 
 
-def peers_save(peerlist, peer_ip):
-
-    peer_file = open(peerlist, 'r')
+def peers_save(peer_list, peer_ip):
     peer_tuples = []
-    for line in peer_file:
-        extension = re.findall("'([\d\.]+)', '([\d]+)'", line)
-        peer_tuples.extend(extension)
-    peer_file.close()
-    peer_tuple = ("('" + peer_ip + "', '" + str(port) + "')")
-
+    with open(peer_list, "r") as peers:
+        for line in peers:
+            extension = re.findall("'([\d\.]+', '([\d]+)'", line)
+            peer_tuples.extend(extension)
+    peer_tuple = ("('{}', '{}')").format(peer_ip, port)
+    
     try:
         if peer_tuple not in str(peer_tuples):
             app_log.warning("Testing connectivity to: {}".format(peer_ip))
@@ -87,21 +85,18 @@ def peers_save(peerlist, peer_ip):
             if tor_conf == 1:
                 peer_test.setproxy(socks.PROXY_TYPE_SOCKS5, "127.0.0.1", 9050)
             # peer_test.setblocking(0)
-            peer_test.connect((str(peer_ip), int(str(port))))  # double parentheses mean tuple
+            peer_test.connect((peer_ip, int(port)))
             app_log.info("Inbound: Distant peer connectible")
 
-            # properly end the connection
             peer_test.close()
-            # properly end the connection
 
-            peer_list_file = open(peerlist, 'a')
-            peer_list_file.write((peer_tuple) + "\n")
+            with open(peerlist, "a") as peers:
+                peers.write("{}\n".format(peer_tuple))
             app_log.info("Inbound: Distant peer saved to peer list")
-            peer_list_file.close()
         else:
             app_log.info("Distant peer already in peer list")
     except:
-        app_log.info("Inbound: Distant peer not connectible")
+        app_log.info("Inbound: Cannot connect to distant peer")
         pass
 
 def sendsync(sdef,peer_ip,status,provider):
@@ -110,9 +105,9 @@ def sendsync(sdef,peer_ip,status,provider):
     if provider == "yes":
         peers_save("peers.txt", peer_ip)
 
-    time.sleep(float(pause_conf))
-    while db_lock.locked() == True:
-        time.sleep(float(pause_conf))
+    time.sleep(pause_conf)
+    while db_lock.locked():
+        time.sleep(pause_conf)
 
     connections.send(sdef, "sendsync", 10)
 
@@ -133,7 +128,7 @@ def validate_pem(public_key):
         # verify pem as cryptodome does
 
 def fee_calculate(openfield):
-    fee = '%.8f' % float(0.01 + (float(len(openfield)) / 100000))  # 0.01 dust
+    fee = '%.8f' % float(0.01 + (len(openfield) / 100000))  # 0.01 dust
     if "token:issue:" in openfield:
         fee = '%.8f' % (float(fee) + 10)
     if "alias=" in openfield:
