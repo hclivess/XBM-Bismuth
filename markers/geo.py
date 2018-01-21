@@ -101,7 +101,6 @@ class MainHandler(tornado.web.RequestHandler):
             src='https://maps.googleapis.com/maps/api/js?key={
             }&callback=initMap'>"
         </script>
-
         <div class = 'col-md-8'>
             Node address: {node_address}<br>
             Number of nodes: {nodes_count}<br>
@@ -126,7 +125,6 @@ class MainHandler(tornado.web.RequestHandler):
                                consensus=response[5],
                                consensus_percentage=response[6],
                                version=response[7]))
-
 
 def make_app():
     return tornado.web.Application([
