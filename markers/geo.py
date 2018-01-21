@@ -23,7 +23,6 @@ class MainHandler(tornado.web.RequestHandler):
 
         nodes_list = response[2]
 
-
         print("IPs:", ips)
 
         with open('geo.json', 'w') as f:
@@ -34,14 +33,12 @@ class MainHandler(tornado.web.RequestHandler):
                     print(response_web).encode("utf-8")
                 except:
                     pass
-                
+
                 markers = """
                 {{lat: {latitude},
                 lng: {longitude}}},
                 """.format(latitude=response_web["latitude"],
                            longitude=response_web["longitude"])
-
-
 
         html = """
         <!DOCTYPE html>
@@ -104,7 +101,6 @@ class MainHandler(tornado.web.RequestHandler):
             src='https://maps.googleapis.com/maps/api/js?key={
             }&callback=initMap'>"
         </script>
-        
         <div class = 'col-md-8'>
             Node address: {node_address}<br>
             Number of nodes: {nodes_count}<br>
@@ -120,23 +116,24 @@ class MainHandler(tornado.web.RequestHandler):
         """
 
         self.write(html.format(markers=markers,
-                   api_key=api_key,
-                   node_address=response[0],
-                   nodes_count=response[1],
-                   nodes_list=nodes_list,
-                   threads_count=response[3],
-                   uptime=response[4],
-                   consensus=response[5],
-                   consensus_percentage=response[6],
-                   version=response[7]))
+                               api_key=api_key,
+                               node_address=response[0],
+                               nodes_count=response[1],
+                               nodes_list=nodes_list,
+                               threads_count=response[3],
+                               uptime=response[4],
+                               consensus=response[5],
+                               consensus_percentage=response[6],
+                               version=response[7]))
 
 def make_app():
     return tornado.web.Application([
         (r"/", MainHandler),
         (r"/static/(.*)",
-        tornado.web.StaticFileHandler,
-        {"path": "static"}),
+         tornado.web.StaticFileHandler,
+         {"path": "static"}),
     ])
+
 
 if __name__ == "__main__":
     app = make_app()
