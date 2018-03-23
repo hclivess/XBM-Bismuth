@@ -1480,9 +1480,9 @@ check_integrity(hyper_path_conf)
 coherence_check()
 
 app_log.warning("Status: Indexing tokens")
-tokens.tokens_update("static/index.db","normal",app_log)
+tokens.tokens_update("index.db","static/ledger.db","normal",app_log)
 app_log.warning("Status: Indexing aliases")
-aliases.aliases_update("static/index.db","normal",app_log)
+aliases.aliases_update("index.db", "static/ledger.db","normal",app_log)
 
 ledger_compress(ledger_path_conf, hyper_path_conf)
 
