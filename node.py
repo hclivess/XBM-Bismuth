@@ -97,8 +97,11 @@ app_log.warning("Configuration settings loaded")
 PEM_VALID_BEGIN = re.compile("\s*-----BEGIN (.*)-----\s+")
 PEM_VALID_END = re.compile("-----END (.*)-----\s*$")
 
+# compile regex for address_validate() one time
+ADDRESS_VALID = re.compile('[abcdef0123456789]{56}')
+
 def address_validate(address):
-    return re.match('[abcdef0123456789]{56}', address)
+    return ADDRESS_VALID.match(address)
 
 def tokens_rollback(height, app_log):
     """rollback token index"""
