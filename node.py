@@ -94,31 +94,36 @@ app_log = log.log("node.log", debug_level_conf, terminal_output)
 app_log.warning("Configuration settings loaded")
 
 def address_validate(address):
-    if re.match ('[abcdef0123456789]{56}', address):
-        return True
-    else:
-        return False
+    return re.match('[abcdef0123456789]{56}', address)
 
 def tokens_rollback(height, app_log):
     """rollback token index"""
-    tok = sqlite3.connect("static/index.db")
-    tok.text_factory = str
-    t = tok.cursor()
-    execute_param(t, ("DELETE FROM tokens WHERE block_height >= ?;"), (height,))
-    commit(tok)
-    t.close()
-    app_log.warning("Rolled back the token index to {}".format(height))
+    try:
+        tok = sqlite3.connect("static/index.db")
+        tok.text_factory = str
+        t = tok.cursor()
+        execute_param(t, ("DELETE FROM tokens WHERE block_height >= ?;"), (height,))
+        commit(tok)
+        app_log.warning("Rolled back the token index to {}".format(height))
+    except:
+        app_log.warning('Failed to roll back token index to height {}'.format(height))
+    finally:
+        t.close()
 
 
 def aliases_rollback(height, app_log):
     """rollback alias index"""
-    ali = sqlite3.connect("static/index.db")
-    ali.text_factory = str
-    a = ali.cursor()
-    execute_param(a, ("DELETE FROM aliases WHERE block_height >= ?;"), (height,))
-    commit(ali)
-    a.close()
-    app_log.warning("Rolled back the alias index to {}".format(height))
+    try:
+        ali = sqlite3.connect("static/index.db")
+        ali.text_factory = str
+        a = ali.cursor()
+        execute_param(a, ("DELETE FROM aliases WHERE block_height >= ?;"), (height,))
+        commit(ali)
+        app_log.warning("Rolled back the alias index to {}".format(height))
+    except:
+        app_log.warning('Failed to roll back alias index to height {}'.format(height))
+    finally:
+        a.close()
 
 
 """ for use after modularizing mempool_merge 
@@ -137,11 +142,11 @@ def sendsync(sdef, peer_ip, status, provider):
 
     app_log.warning("Outbound: Synchronization with {} finished after: {}, sending new sync request".format(peer_ip, status))
 
-    if provider == True:
+    if provider:
         peers.peers_save("peers.txt", peer_ip)
 
     time.sleep(Decimal(pause_conf))
-    while db_lock.locked() == True:
+    while db_lock.locked():
         time.sleep(Decimal(pause_conf))
 
     connections.send(sdef, "sendsync", 10)
@@ -232,42 +237,39 @@ def bootstrap():
         app_log.warning("Something went wrong during bootstrapping, aborted")
         raise
 
-
+        
 #UPDATE DB
-upgrade = sqlite3.connect(ledger_path_conf)
-u = upgrade.cursor()
 try:
+    upgrade = sqlite3.connect(ledger_path_conf)
+    u = upgrade.cursor()
     u.execute("select * from transactions where operation = '0' LIMIT 1")
     u.fetchall()[0]
-    upgrade.close ()
 except:
-    upgrade.close ()
-    print ("Database needs upgrading, bootstrapping...")
+    print("Database needs upgrading, bootstrapping...")
     bootstrap()
-#UPDATE DB
+finally:
+    upgrade.close()
+
 
 def check_integrity(database):
     # check ledger integrity
-    ledger_check = sqlite3.connect(database)
-    ledger_check.text_factory = str
-
-    l = ledger_check.cursor()
-
+    redownload = False
     try:
+        ledger_check = sqlite3.connect(database)
+        ledger_check.text_factory = str
+        l = ledger_check.cursor()
         l.execute("PRAGMA table_info('transactions')")
-        redownload = 0
     except:
-        redownload = 1
-
+        redownload = True
+    
     if len(l.fetchall()) != 12:
         app_log.warning("Status: Integrity check on database failed, bootstrapping from the website")
-        redownload = 1
+        redownload = True
     else:
         ledger_check.close()
-
-    if redownload == 1:
+    
+    if redownload:
         bootstrap()
-
 
 def percentage(percent, whole):
     return ((Decimal(percent) * Decimal(whole)) / 100)
