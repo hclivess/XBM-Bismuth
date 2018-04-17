@@ -93,6 +93,10 @@ global peers
 app_log = log.log("node.log", debug_level_conf, terminal_output)
 app_log.warning("Configuration settings loaded")
 
+# compile regex for validate_pem() one time
+PEM_VALID_BEGIN = re.compile("\s*-----BEGIN (.*)-----\s+")
+PEM_VALID_END = re.compile("-----END (.*)-----\s*$")
+
 def address_validate(address):
     return re.match('[abcdef0123456789]{56}', address)
 
@@ -155,15 +159,13 @@ def sendsync(sdef, peer_ip, status, provider):
 def validate_pem(public_key):
     # verify pem as cryptodome does
     pem_data = base64.b64decode(public_key).decode("utf-8")
-    regex = re.compile("\s*-----BEGIN (.*)-----\s+")
-    match = regex.match(pem_data)
+    match = PEM_VALID.match(pem_data)
     if not match:
         raise ValueError("Not a valid PEM pre boundary")
 
     marker = match.group(1)
 
-    regex = re.compile("-----END (.*)-----\s*$")
-    match = regex.search(pem_data)
+    match = PEM_VALID_END.search(pem_data)
     if not match or match.group(1) != marker:
         raise ValueError("Not a valid PEM post boundary")
         # verify pem as cryptodome does
