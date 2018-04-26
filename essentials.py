@@ -11,7 +11,7 @@ import time
 
 from quantizer import *
 
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 
 
 def db_check(app_log):
@@ -140,3 +140,8 @@ def execute_param_c(cursor, query, param, app_log):
             app_log.warning("Database retry reason: {}".format(e))
             time.sleep(0.1)
     return cursor
+
+def is_sequence(arg):
+    return (not hasattr(arg, "strip") and
+            hasattr(arg, "__getitem__") or
+            hasattr(arg, "__iter__"))
