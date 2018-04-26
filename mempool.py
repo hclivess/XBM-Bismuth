@@ -18,7 +18,7 @@ import json
 from quantizer import *
 import essentials
 
-__version__ = "0.0.2"
+__version__ = "0.0.4"
 
 
 MEMPOOL = None
@@ -46,10 +46,10 @@ SQL_PURGE = "DELETE FROM transactions WHERE timestamp <= strftime('%s', 'now', '
 SQL_CLEAR = "DELETE FROM transactions"
 
 # Check for presence of a given tx signature
-SQL_SIG_CHECK = 'SELECT * FROM transactions WHERE signature = ?;'
+SQL_SIG_CHECK = 'SELECT * FROM transactions WHERE signature = ?'
 
 # delete a single tx
-SQL_DELETE_TX = 'DELETE FROM transactions WHERE signature = ?;'
+SQL_DELETE_TX = 'DELETE FROM transactions WHERE signature = ?'
 
 # Selects all tx from mempool
 SQL_SELECT_ALL_TXS = 'SELECT * FROM transactions'
@@ -64,7 +64,10 @@ SQL_COUNT_DISTINCT_RECIPIENTS = 'SELECT COUNT(DISTINCT(recipient)) FROM transact
 SQL_STATUS = 'SELECT COUNT(*) AS nb, SUM(LENGTH(openfield)) AS len, COUNT(DISTINCT(address)) as senders, COUNT(DISTINCT(recipient)) as recipients FROM transactions'
 
 # Select Tx to be sent to a peer
-SQL_SELECT_TX_TO_SEND = 'SELECT * FROM transactions ORDER BY amount DESC;'
+SQL_SELECT_TX_TO_SEND = 'SELECT * FROM transactions ORDER BY amount DESC'
+
+# Select Tx to be sent to a peer since the given ts
+SQL_SELECT_TX_TO_SEND_SINCE = 'SELECT * FROM transactions where timestamp > ? ORDER BY amount DESC'
 
 
 class Mempool:
@@ -77,6 +80,9 @@ class Mempool:
             self.db_lock = db_lock
             self.ram = self.config.mempool_ram_conf
             self.lock = threading.Lock()
+            self.peers_lock = threading.Lock()
+            # ip: last time sent
+            self.peers_sent= dict()
             self.db = None
             self.cursor = None
             self.check()
@@ -255,8 +261,19 @@ class Mempool:
         :return: tuple(tx#, openfield len, distinct sender#, distinct recipients#
         """
         try:
+            limit = time.time()
+            frozen = [peer for peer in self.peers_sent if self.peers_sent[peer] > limit ]
+            self.app_log.warning("Status: MEMPOOL Frozen = {}".format(", ".join(frozen)))
+            # print(limit, self.peers_sent, frozen)
+            # Cleanup old nodes not synced since 15 min
+            limit = limit - 15 * 60
+            with self.peers_lock:
+                self.peers_sent = {peer:self.peers_sent[peer] for peer in self.peers_sent if self.peers_sent[peer] > limit }
+            self.app_log.warning("Status: MEMPOOL Live = {}".format(", ".join(set(self.peers_sent.keys()) - set(frozen))))
             status = self.fetchall(SQL_STATUS)
-            self.app_log.warning("Status: MEMPOOL {}".format(json.dumps(status[0])))
+            count, open_len, senders, recipients = status[0]
+            #self.app_log.warning("Status: MEMPOOL {}".format(json.dumps(status[0])))
+            self.app_log.warning("Status: MEMPOOL {} Txs from {} senders to {} distinct recipients. Openfield len {}".format(count, senders, recipients, open_len ))
             return status[0]
         except:
             return 0
@@ -273,32 +290,126 @@ class Mempool:
         except:
             return 0
 
-    def tx_to_send(self, peer_ip):
+    def sent(self, peer_ip):
+        """
+        record time of last mempool send to this peer
+        :param peer_ip:
+        :return:
+        """
+        # TODO: have a purge
+        when = time.time()
+        if peer_ip in self.peers_sent:
+            # can be frozen, no need to lock and update, time is already in the future.
+            if self.peers_sent[peer_ip] > when:
+                return
+        with self.peers_lock:
+            self.peers_sent[peer_ip] = when
+
+    def sendable(self, peer_ip):
+        """
+        Tells is the mempool is sendable to a given peers
+        (ie, we sent it more than 30 sec ago)
+        :param peer_ip:
+        :return:
+        """
+        if peer_ip not in self.peers_sent:
+            # New peer
+            return True
+        sendable = self.peers_sent[peer_ip] < time.time() - drift_limit
+        # Temp
+        if not sendable:
+            pass
+            # self.app_log.warning("Mempool not sendable for {} yet.".format(peer_ip))
+        return sendable
+
+    def tx_to_send(self, peer_ip, peer_txs=None):
         """
         Selects the Tx to be sent to a given peer
         :param peer_ip:
         :return:
         """
         if DEBUG_DO_NOT_SEND_TX:
+            all = self.fetchall(SQL_SELECT_TX_TO_SEND)
+            tx_count = len(all)
+            tx_list = [tx[1]+' '+tx[2]+' : '+str(tx[3]) for tx in all]
+            #print("I have {} txs for {} but won't send: {}".format(tx_count, peer_ip, "\n".join(tx_list)))
+            print("I have {} txs for {} but won't send".format(tx_count, peer_ip))
             return []
-        # TODO: may use data from peer
-        return self.fetchall(SQL_SELECT_TX_TO_SEND)
+        # Get our raw txs
+        if peer_ip not in self.peers_sent:
+            # new peer, never seen, send all
+            raw = self.fetchall(SQL_SELECT_TX_TO_SEND)
+        else:
+            # add some margin to account for tx in the future, 5 sec ?
+            last_sent = self.peers_sent[peer_ip]-5
+            raw = self.fetchall(SQL_SELECT_TX_TO_SEND_SINCE, (last_sent, ))
+        # Now filter out the tx we got from the peer
+        if peer_txs:
+            peers_sig = [tx[4] for tx in peer_txs]
+            # TEMP
+            #print("raw for", peer_ip, len(raw))
+            #print("peers_sig", peer_ip, len(peers_sig))
+            filtered = [tx for tx in raw if raw[4] not in peers_sig]
+            # TEMP
+            #print("filtered", peer_ip, len(filtered))
+            return filtered
+        else:
+            return raw
 
-    def merge(self, data, peer_ip, c, size_bypass):
+    def merge(self, data, peer_ip, c, size_bypass=False, wait=False, revert=False):
+        """
+        Checks and merge the tx list in out mempool
+        :param data:
+        :param peer_ip:
+        :param c:
+        :param size_bypass: if True, will merge whatever the mempool size is
+        :param wait: if True, will wait until the main db_lock is free. if False, will just drop.
+        :param revert: if True, we are reverting tx from digest_block, so main lock is on. Don't bother, process without lock.
+        :return:
+        """
         if not data:
             return "Mempool from {} was empty".format(peer_ip)
 
         mempool_result = []
-        mempool_size = self.size()  # caulculate current mempool size before adding txs
+
+        if data == '*':
+            raise ValueError("Connection lost")
+
+        try:
+            if self.peers_sent[peer_ip] > time.time():
+                self.app_log.warning("Mempool ignoring merge from frozen {}".format(peer_ip))
+                mempool_result.append("Mempool ignoring merge from frozen {}".format(peer_ip))
+                return mempool_result
+        except:
+            # unknown peer
+            pass
+
+        if not essentials.is_sequence(data):
+            with self.peers_lock:
+                self.peers_sent[peer_ip] = time.time() + 10 * 60
+            self.app_log.warning("Freezing mempool from {} for 10 min - Bad TX format".format(peer_ip))
+            mempool_result.append("Bad TX Format")
+            return mempool_result
+
         mempool_result.append("Mempool merging started from {}".format(peer_ip))
 
-        while self.db_lock.locked():  # prevent transactions which are just being digested from being added to mempool
-            mempool_result.append("Waiting for block digestion to finish before merging mempool")
-            time.sleep(1)
-        # TODO: we check main ledger db is not locked before beginning, but we don't lock?
+        if not revert:
+            while self.db_lock.locked():  # prevent transactions which are just being digested from being added to mempool
+                if not wait:
+                    # not reverting, but not waiting, bye
+                    # By default, we don't wait.
+                    mempool_result.append("Locked ledger, dropping txs")
+                    return mempool_result
+                self.app_log.warning("Waiting for block digestion to finish before merging mempool")
+                time.sleep(1)
+        # if reverting, don't bother with main lock, go on.
+
+        mempool_size = self.size()  # caulculate current mempool size before adding txs
+
+        # TODO: we check main ledger db is not locked before beginning, but we don't lock? ok, see comment in node.py. since it's called from a lock, it would deadlock.
         # merge mempool
-        while self.lock.locked():
-            time.sleep(1)
+        #while self.lock.locked():
+        #    time.sleep(1)
         with self.lock:
             try:
                 block_list = data
@@ -331,20 +442,23 @@ class Mempool:
                         mempool_public_key = RSA.importKey(base64.b64decode(mempool_public_key_hashed))
                         mempool_signature_dec = base64.b64decode(mempool_signature_enc)
 
-                        acceptable = 1
+                        acceptable = True
 
                         try:
                             # TODO: sure it will throw an exception?
                             # condition 1)
                             dummy = self.fetchall("SELECT * FROM transactions WHERE signature = ?;",
                                                   (mempool_signature_enc,))
-                            #print('sigmempool', mempool_signature_enc, dummy)
-                            # mempool_result.append("That transaction is already in our mempool")
-                            acceptable = 0
-                            mempool_in = 1
+                            if dummy:
+                                # self.app_log.warning("That transaction is already in our mempool")
+                                mempool_result.append("That transaction is already in our mempool")
+                                acceptable = False
+                                mempool_in = True
+                            else:
+                                mempool_in = False
                         except:
                             #print('sigmempool NO ', mempool_signature_enc)
-                            mempool_in = 0
+                            mempool_in = False
 
                         # reject transactions which are already in the ledger
                         # TODO: not clean, will need to have ledger as a module too.
@@ -354,13 +468,22 @@ class Mempool:
                         try:
                             dummy = c.fetchall()[0]
                             #print('sigledger', mempool_signature_enc, dummy)
-                            mempool_result.append("That transaction is already in our ledger")
-                            # reject transactions which are already in the ledger
-                            acceptable = 0
-                            ledger_in = 1
+                            if dummy:
+                                mempool_result.append("That transaction is already in our ledger")
+                                # self.app_log.warning("That transaction is already in our ledger")
+                                # reject transactions which are already in the ledger
+                                acceptable = False
+                                ledger_in = True
+                                # Can be a syncing node. Do not request mempool from this peer until 10 min
+                                with self.peers_lock:
+                                    self.peers_sent[peer_ip] = time.time() + 10*60
+                                self.app_log.warning("Freezing mempool from {} for 10 min.".format(peer_ip))
+                                return mempool_result
+                            else:
+                                ledger_in = False
                         except:
                             #print('sigledger NO ', mempool_signature_enc)
-                            ledger_in = 0
+                            ledger_in = False
 
                         # if mempool_operation != "1" and mempool_operation != "0":
                         #    mempool_result.append = ("Mempool: Wrong keep value {}".format(mempool_operation))
@@ -368,24 +491,27 @@ class Mempool:
 
                         if mempool_address != hashlib.sha224(base64.b64decode(mempool_public_key_hashed)).hexdigest():
                             mempool_result.append("Mempool: Attempt to spend from a wrong address")
-                            acceptable = 0
+                            # self.app_log.warning("Mempool: Attempt to spend from a wrong address")
+                            acceptable = False
 
                         if not essentials.address_validate(mempool_address) or not essentials.address_validate(mempool_recipient):
                             mempool_result.append("Mempool: Not a valid address")
-                            acceptable = 0
+                            # self.app_log.warning("Mempool: Not a valid address")
+                            acceptable = False
 
                         if quantize_eight(mempool_amount) < 0:
-                            acceptable = 0
+                            acceptable = False
                             mempool_result.append("Mempool: Negative balance spend attempt")
+                            # self.app_log.warning("Mempool: Negative balance spend attempt")
 
-                        if quantize_two(mempool_timestamp) > time.time() + 30:  # dont accept future txs
-                            acceptable = 0
+                        if quantize_two(mempool_timestamp) > time.time() + drift_limit:  # dont accept future txs
+                            acceptable = False
 
                         # dont accept old txs, mempool needs to be harsher than ledger
                         if quantize_two(mempool_timestamp) < time.time() - 82800:
                             acceptable = 0
                         # remove from mempool if it's in both ledger and mempool already
-                        if (mempool_in == 1) and (ledger_in == 1):
+                        if mempool_in and ledger_in:
                             try:
                                 # Do not lock, we already have the lock for the whole merge.
                                 self.execute(SQL_DELETE_TX, (mempool_signature_enc, ))
@@ -405,13 +531,13 @@ class Mempool:
                         my_hash = SHA.new(str((mempool_timestamp, mempool_address, mempool_recipient, mempool_amount,
                                                mempool_operation, mempool_openfield)).encode("utf-8"))
                         if not verifier.verify(my_hash, mempool_signature_dec):
-                            acceptable = 0
+                            acceptable = False
                             mempool_result.append("Mempool: Wrong signature in mempool insert attempt: {}".
                                                   format(transaction))
+                            # self.app_log.warning("Mempool: Wrong signature in mempool insert attempt")
 
                         # verify signature
-
-                        if acceptable == 1:
+                        if acceptable:
 
                             # verify balance
                             # mempool_result.append("Mempool: Verifying balance")
@@ -478,21 +604,24 @@ class Mempool:
 
                             time_now = time.time()
 
-                            global drift_limit
                             if quantize_two(mempool_timestamp) > quantize_two(time_now) + drift_limit:
                                 mempool_result.append(
                                     "Mempool: Future transaction not allowed, timestamp {} minutes in the future".
                                     format(quantize_two((quantize_two(mempool_timestamp) - quantize_two(time_now))
                                     / 60)))
+                                # self.app_log.warning("Mempool: Future transaction not allowed, timestamp {} minutes in the future.")
+
 
                             elif quantize_two(time_now) - 86400 > quantize_two(mempool_timestamp):
                                 mempool_result.append("Mempool: Transaction older than 24h not allowed.")
+                                # self.app_log.warning("Mempool: Transaction older than 24h not allowed.")
 
                             elif quantize_eight(mempool_amount) > quantize_eight(balance_pre):
                                 mempool_result.append("Mempool: Sending more than owned")
-
+                                # self.app_log.warning("Mempool: Sending more than owned")
                             elif quantize_eight(balance) - quantize_eight(fee) < 0:
                                 mempool_result.append("Mempool: Cannot afford to pay fees")
+                                # self.app_log.warning("Mempool: Cannot afford to pay fees")
 
                             # verify signatures and balances
                             else:
@@ -508,6 +637,7 @@ class Mempool:
                                 mempool_size = mempool_size + sys.getsizeof(str(transaction)) / 1000000.0
                     else:
                         mempool_result.append("Local mempool is already full for this tx type, skipping merging")
+                        # self.app_log.warning("Local mempool is already full for this tx type, skipping merging")
                         return mempool_result  # avoid spamming of the logs
                 # TODO: Here maybe commit() on c to release the write lock?
             except Exception as e:
@@ -518,4 +648,3 @@ class Mempool:
             return e, mempool_result
         except:
             return mempool_result
-          
