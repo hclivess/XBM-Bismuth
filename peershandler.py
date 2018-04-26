@@ -8,7 +8,7 @@ import threading
 
 import socks
 
-__version__ = "0.0.4"
+__version__ = "0.0.5"
 
 
 # TODO : some config options are _conf and others without => clean up later on
@@ -63,7 +63,7 @@ class Peers:
 
     def status_dict(self):
         """Returns a status as a dict"""
-        status={"version":VERSION,"stats":self.stats}
+        status={"version":self.config.VERSION,"stats":self.stats}
         return status
 
     def peers_save(self, peerlist, peer_ip):
@@ -180,6 +180,9 @@ class Peers:
     def is_allowed(self, peer_ip, command=''):
         """Tells if the given peer is allowed for that command"""
         # TODO: more granularity here later
+        # Always allow whitelisted ip to post as block
+        if 'block' == command and self.is_whitelisted(peer_ip):
+            return True
         return peer_ip in self.config.allowed_conf or "any" in self.config.allowed_conf
 
     def is_whitelisted(self, peer_ip, command=''):
