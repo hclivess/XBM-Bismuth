@@ -354,7 +354,7 @@ def ledger_compress(ledger_path_conf, hyper_path_conf):
 
                 if hdd_block_last == hdd2_block_last and hyper_recompress_conf == 1:  # cross-integrity check
                     ledger_path_conf = hyper_path_conf  # only valid within the function, this temporarily sets hyper.db as source
-                    app_log.warning("Staus: Recompressing hyperblocks (keeping full ledger)")
+                    app_log.warning("Status: Recompressing hyperblocks (keeping full ledger)")
                     recompress = 1
                 elif hdd_block_last == hdd2_block_last and hyper_recompress_conf == 0:
                     app_log.warning("Status: Hyperblock recompression skipped")
@@ -748,8 +748,9 @@ def blocknf(block_hash_delete, peer_ip, conn, c, hdd, h, hdd2, h2):
                         if tx[9] == 0:
                             #app_log.info (mempool_merge ((tx[1], tx[2], tx[3], tx[4], tx[5], tx[6], tx[10], tx[11]), peer_ip, c, mempool, m, False))  # will get stuck if you change it to respect db_lock
                             # commit (mempool)
-                            app_log.info(mp.MEMPOOL.merge((tx[1], tx[2], tx[3], tx[4], tx[5], tx[6], tx[10], tx[11]), peer_ip, c, False))  # will get stuck if you change it to respect db_lock
-                            app_log.warning("Moved tx back to mempool: {}".format (tx))
+                            app_log.info(mp.MEMPOOL.merge((tx[1], tx[2], tx[3], tx[4], tx[5], tx[6], tx[10], tx[11]), peer_ip, c, False, revert=True))  # will get stuck if you change it to respect db_lock
+                            tx_short = "{} - {} to {}: {} ({})".format(tx[1], tx[2], tx[3], tx[4], tx[11])
+                            app_log.warning("Moved tx back to mempool: {}".format (tx_short))
                         break
                     except Exception as e:
                         app_log.info (e)
@@ -1363,7 +1364,14 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
                     app_log.info(mp.MEMPOOL.merge(segments, peer_ip, c, False))
                     # receive theirs
 
-                    mempool_txs = mp.MEMPOOL.tx_to_send(peer_ip)
+                    if mp.MEMPOOL.sendable(peer_ip):
+                        # Only send the diff
+                        mempool_txs = mp.MEMPOOL.tx_to_send(peer_ip, segments)
+                        # and note the time
+                        mp.MEMPOOL.sent(peer_ip)
+                    else:
+                        # We already sent not long ago, send empy
+                        mempool_txs = []
                     # send own
                     # app_log.info("Inbound: Extracted from the mempool: " + str(mempool_txs))  # improve: sync based on signatures only
                     # if len(mempool_txs) > 0: same as the other
@@ -1566,7 +1574,7 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
                         # check if we have the latest block
 
                         if "testnet" not in version:
-                            if len(peers.connection_pool) < 5:
+                            if len(peers.connection_pool) < 5 and not peers.is_whitelisted(peer_ip):
                                 app_log.warning("Outbound: Mined block ignored, insufficient connections to the network")
                             elif int(db_block_height) >= int(peers.consensus_max) - 3 and not db_lock.locked():
                                 app_log.warning("Outbound: Processing block from miner")
@@ -1609,7 +1617,11 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
                     # if (peer_ip in allowed or "any" in allowed):
                     if peers.is_allowed(peer_ip, data):
                         mempool_insert = connections.receive(self.request, 10)
+                        app_log.warning("mpinsert command")
+                        print(mempool_insert)
+
                         mpinsert_result = mp.MEMPOOL.merge(mempool_insert, peer_ip, c, True)
+                        app_log.warning("mpinsert result: {}".format(mpinsert_result))
                         connections.send(self.request, mpinsert_result, 10)
                     else:
                         app_log.info("{} not whitelisted for mpinsert command".format(peer_ip))
@@ -1924,7 +1936,10 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
                 #    app_log.info(">> Inbound got ping from {}".format(peer_ip))
 
                 else:
-                    raise ValueError("Unexpected error, received: " + str(data))
+                    # Limit logs
+                    if data == '*':
+                        raise ValueError("Broken pipe")
+                    raise ValueError("Unexpected error, received: " + str(data)[:32]+' ...')
 
                 if not time.time() <= timer_operation + timeout_operation:
                     timer_operation = time.time()  # reset timer
@@ -2194,25 +2209,26 @@ def worker(HOST, PORT):
 
             elif data == "nonewblk":
                 # send and receive mempool
-                mempool_txs = mp.MEMPOOL.tx_to_send(peer_ip)
-
-                # app_log.info("Outbound: Extracted from the mempool: " + str(mempool_txs))  # improve: sync based on signatures only
-
-                # if len(mempool_txs) > 0: #wont sync mempool until we send something, which is bad
-                # send own
-                connections.send(s, "mempool", 10)
-                connections.send(s, mempool_txs, 10)
-                # send own
-
-                # receive theirs
-                segments = connections.receive(s, 10)
-                app_log.info(mp.MEMPOOL.merge(segments, peer_ip, c, True))
-                # receive theirs
-
+                if mp.MEMPOOL.sendable(peer_ip):
+                    mempool_txs = mp.MEMPOOL.tx_to_send(peer_ip)
+                    # app_log.info("Outbound: Extracted from the mempool: " + str(mempool_txs))  # improve: sync based on signatures only
+                    # if len(mempool_txs) > 0: #wont sync mempool until we send something, which is bad
+                    # send own
+                    connections.send(s, "mempool", 10)
+                    connections.send(s, mempool_txs, 10)
+                    # send own
+                    # receive theirs
+                    segments = connections.receive(s, 10)
+                    app_log.info(mp.MEMPOOL.merge(segments, peer_ip, c, True))
+                    # receive theirs
+                    # Tell the mempool we just send our pool to a peer
+                    mp.MEMPOOL.sent(peer_ip)
                 sendsync(s, peer_ip, "No new block", True)
 
             else:
-                raise ValueError("Unexpected error, received: {}".format(data))
+                if data == '*':
+                    raise ValueError("Broken pipe")
+                raise ValueError("Unexpected error, received: {}".format(str(data)[:32]))
 
         except Exception as e:
             # remove from active pool
@@ -2220,9 +2236,11 @@ def worker(HOST, PORT):
                 app_log.info("Will remove {} from active pool {}".format(this_client, peers.connection_pool))
                 app_log.warning("Outbound: Disconnected from {}: {}".format(this_client, e))
                 # temp
+                """
                 exc_type, exc_obj, exc_tb = sys.exc_info()
                 fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
                 print(exc_type, fname, exc_tb.tb_lineno)
+                """
                 # temp
                 peers.remove_client(this_client)
 
