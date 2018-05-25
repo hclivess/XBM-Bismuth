@@ -1,4 +1,4 @@
-import socks, connections, time, sys, json
+import socks, connections, time, sys, json, re
 from Crypto.PublicKey import RSA
 
 #define private key
@@ -8,6 +8,10 @@ exchange_address = "MAIN_EXCHANGE_ADDRESS"
 
 #print ('Number of arguments:', len(sys.argv), 'arguments.')
 #print ('Argument List:', str(sys.argv))
+
+def replace_regex_all(string, replace):
+    replaced_string = re.sub(r'{}'.format(replace), "", string)
+    return replaced_string
 
 try:
     command = sys.argv[1]
@@ -99,7 +103,7 @@ def gettransactions(socket):
 				u"blockhash": row[0],
 				u"blockindex": row[0],
 				u"blocktime": int(float(row[1])),
-				u"txid": row[5][:64],
+				u"txid": row[5][:56],
 				u"time": int(float(row[1])),
 				u"timereceived": int(float(row[1]))
         })
@@ -115,14 +119,14 @@ def sendtransaction(socket, arg1, arg2, arg3):
     remote_tx_privkey = private_key_readable 
     remote_tx_recipient = arg1
     remote_tx_amount = arg2
-    remote_tx_keep = '0'
+    remote_tx_operation = '0'
     remote_tx_openfield = arg3
 
-    connections.send(s, (str(remote_tx_timestamp), str(remote_tx_privkey), str(remote_tx_recipient), str(remote_tx_amount), str(remote_tx_keep), str(remote_tx_openfield)), 10)
+    connections.send(s, (str(remote_tx_timestamp), str(remote_tx_privkey), str(remote_tx_recipient), str(remote_tx_amount), str(remote_tx_operation), str(remote_tx_openfield)), 10)
     tx_id = connections.receive(s, 10)
 
     result = {
-		u"txid": tx_id[:64] 
+		u"txid": tx_id[:56]
 	}
     print(json.dumps(result, indent=2))
     #generate transaction
@@ -150,7 +154,10 @@ elif command == "gettransactions":
 
 elif command == "sendtransaction":
     try:
-        arg3
+        arg3 = replace_regex_all(arg3, "token:issue:")
+        arg3 = replace_regex_all(arg3, "alias=")
+        arg3.encode().decode()
+
     except:
         arg3=""
 

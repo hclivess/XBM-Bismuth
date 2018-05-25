@@ -1,4 +1,5 @@
-import base64, sqlite3, hashlib, time, socks, keys, sys, connections, ast, re, options
+import base64, sqlite3, hashlib, time, socks, essentials, sys, connections, ast, re, options, getpass
+from simplecrypt import *
 from Crypto.Signature import PKCS1_v1_5
 from Crypto.Hash import SHA
 from Crypto import Random
@@ -36,6 +37,7 @@ if "testnet" in version:
     port = 2829
     peerlist = "peers_test.txt"
     ledger_path_conf = "static/test.db"
+    print("Mining on testnet")
 else:
     peerlist = "peers.txt"
 
@@ -147,11 +149,13 @@ def execute_param(cursor, what, param):
 def miner(q, privatekey_readable, public_key_hashed, address):
     from Crypto.PublicKey import RSA
     Random.atfork()
-    key = RSA.importKey(privatekey_readable)
     rndfile = Random.new()
     tries = 0
     firstrun = True
     begin = time.time()
+    key = RSA.importKey(privatekey_readable)
+
+
 
     if pool_conf == 1:
         #do not use pools public key to sign, signature will be invalid
@@ -270,10 +274,10 @@ def miner(q, privatekey_readable, public_key_hashed, address):
                     signature = signer.sign(h)
                     signature_enc = base64.b64encode(signature)
 
-                    if signer.verify(h, signature) == True:
+                    if signer.verify(h, signature):
                         print("Signature valid")
 
-                        block_send.append((str(block_timestamp), str(address[:56]), str(address[:56]), '%.8f' % float(0), str(signature_enc.decode("utf-8")), str(public_key_hashed), "0", str(nonce)))  # mining reward tx
+                        block_send.append((str(block_timestamp), str(address[:56]), str(address[:56]), '%.8f' % float(0), str(signature_enc.decode("utf-8")), str(public_key_hashed.decode("utf-8")), "0", str(nonce)))  # mining reward tx
                         print("Block to send: {}".format(block_send))
 
                         if not any(isinstance(el, list) for el in block_send):  # if it's not a list of lists (only the mining tx and no others)
@@ -336,7 +340,10 @@ def miner(q, privatekey_readable, public_key_hashed, address):
 if __name__ == '__main__':
     freeze_support()  # must be this line, dont move ahead
 
-    (key, private_key_readable, public_key_readable, public_key_hashed, address) = keys.read()
+    key, public_key_readable, private_key_readable, encrypted, unlocked, public_key_hashed, address = essentials.keys_load_new ("wallet.der")
+    if not unlocked:
+        key, private_key_readable = essentials.keys_unlock(private_key_readable)
+
 
     connected = 0
     while connected == 0:

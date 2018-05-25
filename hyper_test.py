@@ -7,7 +7,7 @@ from quantizer import *
 
 print(getcontext())
 #getcontext().prec=120
-getcontext().rounding=ROUND_HALF_EVEN
+#getcontext().rounding=ROUND_05UP
 #getcontext().Emin=-100
 #getcontext().Emax=100
 
@@ -71,20 +71,28 @@ def execute_param(cursor, query, param):
     return cursor
 
 def balance_from_cursor(cursor, address):
-    execute_param(cursor, "SELECT sum(amount)+sum(reward) FROM transactions WHERE recipient = ? ",(address, ))
-    try:
-        credit = Decimal(cursor.fetchone()[0])
-        credit = 0 if credit is None else credit
-    except Exception as e:
-        credit = 0
+    credit = Decimal("0")
+    debit = Decimal("0")
+    for entry in execute_param(cursor, "SELECT amount,reward FROM transactions WHERE recipient = ? ",(address, )):
+        try:
+            #result = cursor.fetchall()
+            credit = credit + quantize_eight(entry[0]) + quantize_eight(entry[1])
+            #print (result)
+            credit = 0 if credit is None else credit
+        except Exception as e:
+            credit = 0
+        #print (credit)
 
-    execute_param(cursor, "SELECT sum(amount)+sum(fee) FROM transactions WHERE address = ? ",(address, ))
-    try:
-        debit = Decimal(cursor.fetchone()[0])
-        debit = 0 if debit is None else debit
-    except Exception as e:
-        debit = 0
-    #print (credit,debit)
+
+    for entry in execute_param(cursor, "SELECT amount,fee FROM transactions WHERE address = ? ",(address, )):
+        try:
+            # result = cursor.fetchall()
+            debit = debit + quantize_eight(entry[0]) + quantize_eight(entry[1])
+            # print (result)
+            debit = 0 if debit is None else debit
+        except Exception as e:
+            debit = 0
+        # print (debit)
 
     return quantize_eight(credit-debit)
 
@@ -99,7 +107,12 @@ def check(addresses):
         else:
             check = '> Ko'
             ERRORS += 1
-            print(check, address, balance1, balance2)
+
+        if address.lower() != address or len(address) != 56 and (balance1 or balance2) != 0:
+            print (address,'> you dun fukt it up')
+
+
+        print(check, address, balance1, balance2)
 
         if (Decimal(balance1) < 0 or Decimal(balance2) < 0):
             print(address,balance1,balance2)

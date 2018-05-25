@@ -1,9 +1,11 @@
 import socks, connections, time
-from Crypto.PublicKey import RSA
+import json
 
 #define private key
-key = RSA.importKey(open('privkey.der').read())
-private_key_readable = str(key.exportKey().decode("utf-8")) #private key must be decoded
+with open ("wallet.der", 'r') as wallet_file:
+    wallet_dict = json.load (wallet_file)
+
+private_key_readable = wallet_dict['Private Key']
 
 #define connection and connect
 s = socks.socksocket()
@@ -19,11 +21,11 @@ def txsend(socket, arg1, arg2, arg3, arg4, arg5):
     remote_tx_privkey = arg1 #node will dump pubkey+address from this
     remote_tx_recipient = arg2
     remote_tx_amount = arg3
-    remote_tx_keep = arg4
+    remote_tx_operation = arg4
     remote_tx_openfield = arg5
 
     #connections.send(s, (remote_tx_timestamp, remote_tx_privkey, remote_tx_recipient, remote_tx_amount, remote_tx_keep, remote_tx_openfield), 10)
-    connections.send(s, (str(remote_tx_timestamp), str(remote_tx_privkey), str(remote_tx_recipient), str(remote_tx_amount), str(remote_tx_keep), str(remote_tx_openfield)), 10)
+    connections.send(s, (str(remote_tx_timestamp), str(remote_tx_privkey), str(remote_tx_recipient), str(remote_tx_amount), str(remote_tx_operation), str(remote_tx_openfield)), 10)
     #generate transaction
 
     signature = connections.receive(s, 10)

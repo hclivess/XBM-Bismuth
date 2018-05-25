@@ -4,6 +4,7 @@
 from Crypto.PublicKey import RSA
 from Crypto.Signature import PKCS1_v1_5
 from Crypto.Hash import SHA
+from essentials import fee_calculate
 
 from simplecrypt import encrypt, decrypt
 import base64
@@ -14,6 +15,9 @@ import essentials
 import sys
 import options
 import getpass
+import re
+import socks
+import connections
 
 config = options.Get()
 config.read()
@@ -21,13 +25,12 @@ full_ledger = config.full_ledger_conf
 ledger_path = config.ledger_path_conf
 hyper_path = config.hyper_path_conf
 
-if os.path.exists("privkey.der"):
-    private_key_load = "privkey.der"
-else:
-    private_key_load = "privkey_encrypted.der"
 
-public_key_load = "pubkey.der"
-key, public_key_readable, private_key_readable, encrypted, unlocked, public_key_hashed, address = essentials.keys_load(private_key_load, public_key_load)
+
+key, public_key_readable, private_key_readable, encrypted, unlocked, public_key_hashed, address = essentials.keys_load("privkey.der", "pubkey.der")
+
+if encrypted:
+    key, private_key_readable = essentials.keys_unlock(private_key_readable)
 
 print('Number of arguments: %d arguments.' % len(sys.argv))
 print('Argument List: %s' % ', '.join(sys.argv))
@@ -53,28 +56,29 @@ else:
 conn.text_factory = str
 c = conn.cursor()
 
+s = socks.socksocket()
+s.settimeout(10)
+s.connect(("127.0.0.1", 5658))
 
-c.execute("SELECT sum(amount) FROM transactions WHERE recipient = ?;", (address,))
-credit = c.fetchone()[0]
-c.execute("SELECT sum(amount) FROM transactions WHERE address = ?;", (address,))
-debit = c.fetchone()[0]
-c.execute("SELECT sum(fee) FROM transactions WHERE address = ?;", (address,))
-fees = c.fetchone()[0]
-c.execute("SELECT sum(reward) FROM transactions WHERE address = ?;", (address,))
-rewards = c.fetchone()[0]
-c.execute("SELECT MAX(block_height) FROM transactions")
-bl_height = c.fetchone()[0]
+connections.send (s, "balanceget", 10)
+connections.send (s, address, 10)  # change address here to view other people's transactions
+stats_account = connections.receive (s, 10)
+balance = stats_account[0]
+#credit = stats_account[1]
+#debit = stats_account[2]
+#fees = stats_account[3]
+#rewards = stats_account[4]
 
-debit = 0 if debit is None else float('%.8f' % debit)
-fees = 0 if fees is None else float('%.8f' % fees)
-rewards = 0 if rewards is None else float('%.8f' % rewards)
-credit = 0 if credit is None else float('%.8f' % credit)
 
-balance = '%.8f' % (credit - debit - fees + rewards - debit_mempool)
 print("Transction address: %s" % address)
 print("Transction address balance: %s" % balance)
 
 # get balance
+def address_validate(address):
+    if re.match ('[abcdef0123456789]{56}', address):
+        return True
+    else:
+        return False
 
 try:
     amount_input = sys.argv[1]
@@ -86,14 +90,14 @@ try:
 except IndexError:
     recipient_input = input("Recipient: ")
 
-if len(recipient_input) != 56:
-    print("Wrong address length")
+if not address_validate(recipient_input):
+    print("Wrong address format")
     exit(1)
 
 try:
-    keep_input = sys.argv[3]
+    operation_input = sys.argv[3]
 except IndexError:
-    keep_input = 0
+    operation_input = 0
 
 try:
     openfield_input = sys.argv[4]
@@ -101,9 +105,8 @@ except IndexError:
     openfield_input = input("Enter openfield data (message): ")
 
 
-
 # hardfork fee display
-fee = '%.8f' % float(0.01 + (float(len(openfield_input)) / 100000) + int(keep_input))  # 0.01 dust
+fee = fee_calculate(openfield_input)
 print("Fee: %s" % fee)
 
 confirm = input("Confirm (y/n): ")
@@ -124,15 +127,8 @@ if len(str(recipient_input)) != 56:
     print("Wrong address length")
 else:
     timestamp = '%.2f' % time.time()
-    transaction = (str(timestamp), str(address), str(recipient_input), '%.8f' % float(amount_input), str(keep_input), str(openfield_input))  # this is signed
+    transaction = (str(timestamp), str(address), str(recipient_input), '%.8f' % float(amount_input), str(operation_input), str(openfield_input))  # this is signed
     # print transaction
-
-    if key == None:
-        password = getpass.getpass(prompt="Enter password: ", stream=None)
-
-        encrypted_privkey = open(private_key_load, 'rb').read()
-        decrypted_privkey = decrypt(password, base64.b64decode(encrypted_privkey))  # decrypt privkey
-        key = RSA.importKey(decrypted_privkey)  # be able to sign
 
     h = SHA.new(str(transaction).encode("utf-8"))
     signer = PKCS1_v1_5.new(key)
@@ -153,15 +149,15 @@ else:
             print("Mempool: Sending more than owned")
 
         else:
-            print("The signature is valid, proceeding to save transaction to mempool")
-            mempool = sqlite3.connect('mempool.db')
-            mempool.text_factory = str
-            m = mempool.cursor()
-            m.execute("INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?)", (str(timestamp), str(address), str(recipient_input), '%.8f' % float(amount_input), str(signature_enc.decode("utf-8")), str(public_key_hashed), str(keep_input), str(openfield_input)))
-            mempool.commit()  # Save (commit) the changes
-            mempool.close()
-            print("Mempool updated with a received transaction")
-            # refresh() experimentally disabled
+            tx_submit = (str (timestamp), str (address), str (recipient_input), '%.8f' % float (amount_input), str (signature_enc.decode ("utf-8")), str (public_key_hashed.decode("utf-8")), str (operation_input), str (openfield_input))
+            while True:
+                connections.send (s, "mpinsert", 10)
+                connections.send (s, tx_submit, 10)
+                reply = connections.receive (s, 10)
+                print ("Client: {}".format (reply))
+                break
     else:
         print("Invalid signature")
         # enter transaction end
+
+s.close()

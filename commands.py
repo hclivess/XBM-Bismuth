@@ -1,4 +1,8 @@
 import socks, connections, time, sys
+import options
+config = options.Get()
+config.read()
+version = config.version_conf
 
 #print ('Number of arguments:', len(sys.argv), 'arguments.')
 #print ('Argument List:', str(sys.argv))
@@ -64,8 +68,18 @@ except:
 
 s = socks.socksocket()
 s.settimeout(10)
-s.connect(("127.0.0.1", 5658))
+
+
+
+if "testnet" in version:
+    s.connect (("127.0.0.1", 2829))
+    print("tesnet mode")
+else:
+    s.connect(("127.0.0.1", 5658))
 #s.connect(("94.113.207.67", 5658))
+
+def shutdown(socket):
+    connections.send(s, "shutdown", 10)
 
 def diffget(socket):
     #check difficulty
@@ -78,13 +92,13 @@ def balanceget(socket, arg1):
     #get balance
     connections.send(s, "balanceget", 10)
     connections.send(s, arg1, 10)
-    #balance_ledger = connections.receive(s, 10)
-    balance_ledger = connections.receive(s, 10)
-    print ("Address balance: {}".format(balance_ledger[0]))
-    print ("Address credit: {}".format(balance_ledger[1]))
-    print ("Address debit: {}".format(balance_ledger[2]))
-    print ("Address fees: {}".format(balance_ledger[3]))
-    print ("Address rewards: {}".format(balance_ledger[4]))
+    balanceget_result = connections.receive(s, 10)
+    print ("Address balance: {}".format(balanceget_result[0]))
+    print ("Address credit: {}".format(balanceget_result[1]))
+    print ("Address debit: {}".format(balanceget_result[2]))
+    print ("Address fees: {}".format(balanceget_result[3]))
+    print ("Address rewards: {}".format(balanceget_result[4]))
+    print ("Address balance without mempool: {}".format (balanceget_result[5]))
     #get balance
 
 #insert to mempool
@@ -185,11 +199,11 @@ def txsend(socket, arg1, arg2, arg3, arg4, arg5):
     remote_tx_privkey = arg1 #node will dump pubkey+address from this
     remote_tx_recipient = arg2
     remote_tx_amount = arg3
-    remote_tx_keep = arg4
+    remote_tx_operation = arg4
     remote_tx_openfield = arg5
 
     #connections.send(s, (remote_tx_timestamp, remote_tx_privkey, remote_tx_recipient, remote_tx_amount, remote_tx_keep, remote_tx_openfield), 10)
-    connections.send(s, (str(remote_tx_timestamp), str(remote_tx_privkey), str(remote_tx_recipient), str(remote_tx_amount), str(remote_tx_keep), str(remote_tx_openfield)), 10)
+    connections.send(s, (str(remote_tx_timestamp), str(remote_tx_privkey), str(remote_tx_recipient), str(remote_tx_amount), str(remote_tx_operation), str(remote_tx_openfield)), 10)
     #generate transaction
 
     signature = connections.receive(s, 10)
@@ -200,6 +214,12 @@ def aliasget(socket, arg1):
     connections.send(s, arg1, 10)
     alias_results = connections.receive(s, 10)
     print (alias_results)
+
+def tokensget(socket, arg1):
+    connections.send(s, "tokensget", 10)
+    connections.send(s, arg1, 10)
+    tokens_results = connections.receive(s, 10)
+    print (tokens_results)
 
 def addfromalias(socket, arg1):
     connections.send(s, "addfromalias", 10)
@@ -254,6 +274,9 @@ if command == "mpinsert":
 if command == "aliasget":
     aliasget(s, arg1)
 
+if command == "tokensget":
+    tokensget(s, arg1)
+
 if command == "addvalidate":
     addvalidate(s, arg1)
 
@@ -295,6 +318,9 @@ elif command == "addlistlim":
 
 elif command == "listlim":
     listlim(s, arg1)
+
+elif command == "shutdown":
+    shutdown(s)
 
 elif command == "addfromalias":
     addfromalias(s, arg1)

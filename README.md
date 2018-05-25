@@ -5,6 +5,8 @@ Bismuth Readme
 
 http://bismuth.cz
 
+For basic instructions, please refer to https://github.com/EggPool/BismuthHowto
+
 License:
 
 This program is free software; you can redistribute it and/or

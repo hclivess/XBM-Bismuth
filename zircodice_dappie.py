@@ -1,10 +1,12 @@
-import sqlite3, keys, base64, options
+import sqlite3, base64, options
 
 from Crypto.Signature import PKCS1_v1_5
 from Crypto.Hash import SHA
 import time
 from decimal import *
 from random import randint
+import essentials
+from essentials import fee_calculate
 
 block_anchor = 547989 #no payouts previous to this block
 
@@ -27,19 +29,11 @@ def roll(block_height, txid):
     return roll_number
 
 def percentage(percent, whole):
-    getcontext().prec = 2
     return ((Decimal (percent) * Decimal(whole)) / 100)
 
-def fee_calculate(openfield):
-    getcontext().prec = 8
-    fee = Decimal("0.01") + (Decimal(len(openfield)) / 100000)  # 0.01 dust
-    if "token:issue:" in openfield:
-        fee = Decimal(fee) + Decimal(10)
-    if "alias=" in openfield:
-        fee = Decimal(fee) + Decimal(1)
-    return fee
+#(key, private_key_readable, public_key_readable, public_key_hashed, address) = keys.read()
+key, public_key_readable, private_key_readable, _, _, public_key_hashed, address = essentials.keys_load_new("wallet.der")
 
-(key, private_key_readable, public_key_readable, public_key_hashed, address) = keys.read()
 
 config = options.Get()
 config.read()
@@ -161,24 +155,24 @@ while True:
             # create transactions for missing payouts
             timestamp = '%.2f' % time.time()
 
-            payout_amount = Decimal(bet_amount * 2) - percentage(2, bet_amount)
+            payout_amount = Decimal(bet_amount * 2) - percentage(5, bet_amount)
             payout_openfield = "payout for " + tx_signature[:8]
-            payout_keep = 0
+            payout_operation = 0
             fee = fee_calculate(payout_openfield)
 
             #float(0.01 + (float(payout_amount) * 0.001) + (float(len(payout_openfield)) / 100000) + (float(payout_keep) / 10))  # 0.1% + 0.01 dust
 
-            transaction = (str(timestamp), str(address), str(payout_address), '%.8f' % float(payout_amount-fee), str(payout_keep), str(payout_openfield))  # this is signed
+            transaction = (str(timestamp), str(address), str(payout_address), '%.8f' % float(payout_amount-fee), str(payout_operation), str(payout_openfield))  # this is signed
             print(transaction)
 
             h = SHA.new(str(transaction).encode("utf-8"))
             signer = PKCS1_v1_5.new(key)
             signature = signer.sign(h)
             signature_enc = base64.b64encode(signature)
-            print("Encoded Signature: {}".format(signature_enc))
+            print("Encoded Signature: {}".format(signature_enc.decode()))
 
             verifier = PKCS1_v1_5.new(key)
-            if verifier.verify(h, base64.b64decode(signature_enc)) == True:
+            if verifier.verify(h, base64.b64decode(signature_enc)):
                 print("Signature OK")
 
             mempool = sqlite3.connect('mempool.db')
@@ -196,7 +190,7 @@ while True:
                     print ("Database locked, retrying")
                     pass
                 except TypeError: #not there
-                    m.execute("INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?)", (str(timestamp), str(address), str(payout_address), '%.8f' % (float(payout_amount-fee)), str(signature_enc.decode("utf-8")), str(public_key_hashed), "0", str("payout for " + tx_signature[:8])))
+                    m.execute("INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?)", (str(timestamp), str(address), str(payout_address), '%.8f' % (float(payout_amount-fee)), str(signature_enc.decode("utf-8")), str(public_key_hashed.decode("utf-8")), "0", str("payout for " + tx_signature[:8])))
                     mempool.commit()  # Save (commit) the changes
                     mempool.close()
                     print ("Mempool updated with a payout transaction for {}".format(tx_signature[:8]))

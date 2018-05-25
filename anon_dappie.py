@@ -1,9 +1,11 @@
-import time, options, log, sqlite3, ast, os, keys, base64, re
+import time, options, log, sqlite3, ast, os, base64, re
+import essentials
 from Crypto.Signature import PKCS1_v1_5
 from Crypto.Hash import SHA
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import AES, PKCS1_OAEP
 from decimal import *
+from essentials import fee_calculate
 
 config = options.Get()
 config.read()
@@ -16,17 +18,12 @@ terminal_output=config.terminal_output
 
 
 
-(key, private_key_readable, public_key_readable, public_key_hashed, address) = keys.read() #import keys
+#(key, private_key_readable, public_key_readable, public_key_hashed, address) = keys.read() #import keys
+key, public_key_readable, private_key_readable, _, _, public_key_hashed, address = essentials.keys_load_new("wallet.der")
+
+
 app_log = log.log("anon.log",debug_level,terminal_output)
 
-def fee_calculate(openfield):
-    getcontext().prec = 8
-    fee = Decimal("0.01") + (Decimal(len(openfield)) / 100000)  # 0.01 dust
-    if "token:issue:" in openfield:
-        fee = Decimal(fee) + Decimal(10)
-    if "alias=" in openfield:
-        fee = Decimal(fee) + Decimal(1)
-    return float(fee) #float temporarily
 
 def replace_regex(string,replace):
     replaced_string = re.sub(r'^{}'.format(replace), "", string)
@@ -67,7 +64,7 @@ def anonymize(tx_count, per_tx, remainder, anon_recipient, identifier, anon_send
         for tx in range(tx_count):
             #construct tx
             openfield = "mixer"
-            keep = 0
+            operation = 0
             fee = fee_calculate(openfield)
 
             timestamp = '%.2f' % time.time()
@@ -75,7 +72,7 @@ def anonymize(tx_count, per_tx, remainder, anon_recipient, identifier, anon_send
                            str(address),
                            str(anon_recipient),
                            '%.8f' % float(per_tx - fee),
-                           str(keep),
+                           str(operation),
                            str(openfield))  # this is signed
            
 
@@ -90,19 +87,19 @@ def anonymize(tx_count, per_tx, remainder, anon_recipient, identifier, anon_send
                 print("The signature is valid, proceeding to save transaction to mempool")
                 
             #construct tx
-            a.execute("INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?)", (str(timestamp), str(address), str(anon_recipient), '%.8f' % float(per_tx - fee), str(signature_enc.decode("utf-8")), str(public_key_hashed), str(keep), str(identifier)))
+            a.execute("INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?)", (str(timestamp), str(address), str(anon_recipient), '%.8f' % float(per_tx - fee), str(signature_enc.decode("utf-8")), str(public_key_hashed), str(operation), str(identifier)))
             anon.commit()
-            m.execute("INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?)", (str(timestamp), str(address), str(anon_recipient), '%.8f' % float(per_tx - fee), str(signature_enc.decode("utf-8")), str(public_key_hashed), str(keep), str(openfield)))
+            m.execute("INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?)", (str(timestamp), str(address), str(anon_recipient), '%.8f' % float(per_tx - fee), str(signature_enc.decode("utf-8")), str(public_key_hashed), str(operation), str(openfield)))
             mempool.commit()
 
 
         if (remainder - fee) > 0:
             openfield = "mixer"
-            keep = 0
+            operation = 0
             fee = fee_calculate(openfield)
             timestamp = '%.2f' % time.time()
-            transaction = (str(timestamp), str(address), str(anon_sender), '%.8f' % float(remainder - fee), str(keep), str(openfield))  # this is signed
-            m.execute("INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?)", (str(timestamp), str(address), str(anon_sender), '%.8f' % float(remainder - fee), str(signature_enc.decode("utf-8")), str(public_key_hashed), str(keep), str(openfield)))
+            transaction = (str(timestamp), str(address), str(anon_sender), '%.8f' % float(remainder - fee), str(operation), str(openfield))  # this is signed
+            m.execute("INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?)", (str(timestamp), str(address), str(anon_sender), '%.8f' % float(remainder - fee), str(signature_enc.decode("utf-8")), str(public_key_hashed), str(operation), str(openfield)))
             mempool.commit()
     return
 
@@ -111,7 +108,7 @@ if not os.path.exists('anon.db'):
     anon = sqlite3.connect('anon.db', timeout=1)
     anon.text_factory = str
     a = anon.cursor()
-    a.execute("CREATE TABLE IF NOT EXISTS transactions (timestamp, address, recipient, amount, signature, public_key, keep, openfield)")
+    a.execute("CREATE TABLE IF NOT EXISTS transactions (timestamp, address, recipient, amount, signature, public_key, operation, openfield)")
     anon.commit()
     print("Created anon file")
 
@@ -123,7 +120,6 @@ if full_ledger == 1:
     conn = sqlite3.connect(ledger_path)
 else:
     conn = sqlite3.connect(hyper_path)
-
 conn.text_factory = str
 c = conn.cursor()
 
@@ -133,7 +129,7 @@ m = mempool.cursor()
 
 while True:
     try:
-        for row in c.execute("SELECT * FROM transactions WHERE recipient = ? and openfield LIKE ? LIMIT 500", (address,)+("enc="+'%',)):
+        for row in c.execute("SELECT * FROM transactions WHERE recipient = ? and openfield LIKE ? LIMIT 500", (address,"enc="+'%',)):
             anon_sender = row[2]
 
             try:

@@ -48,6 +48,7 @@ def aliases_update(file,ledger,mode,app_log):
         except:
             a.execute("INSERT INTO aliases VALUES (?,?,?)", (openfield[0],openfield[1],alias))
             ali.commit()
+            app_log.warning ("Added alias to the database: {}".format (alias))
 
     conn.close()
     ali.close()
@@ -55,5 +56,5 @@ def aliases_update(file,ledger,mode,app_log):
 # index aliases
 
 if __name__ == "__main__":
-    app_log = log.log("tokens.log", "WARNING", "yes")
-    aliases_update("index.db","static/ledger.db","normal",app_log)
+    app_log = log.log("tokens.log", "WARNING", True)
+    aliases_update("static/index.db","static/ledger.db","normal",app_log)

@@ -2,14 +2,7 @@
 
 import options
 import os, sqlite3, sys,  time, random
-from decimal import *
 from quantizer import *
-
-print(getcontext())
-#getcontext().prec=120
-#getcontext().rounding=ROUND_05UP
-#getcontext().Emin=-100
-#getcontext().Emax=100
 
 config = options.Get()
 config.read()
@@ -107,6 +100,10 @@ def check(addresses):
         else:
             check = '> Ko'
             ERRORS += 1
+
+        if address.lower() != address or len(address) != 56 and (balance1 or balance2) != 0:
+            print (address,'> you dun fukt it up')
+
 
         print(check, address, balance1, balance2)
 
