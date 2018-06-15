@@ -1289,12 +1289,14 @@ def digest_block(data, sdef, peer_ip, conn, c, hdd, h, hdd2, h2, h3):
 
                         plugin_manager.execute_action_hook('block',
                                                            {'height': block_height_new, 'diff': diff_save,
-                                                            'hash': block_hash})
+                                                            'hash': block_hash, 'timestamp': block_timestamp,
+                                                            'miner': miner_address})
 
                         plugin_manager.execute_action_hook('fullblock',
                                                            {'height': block_height_new, 'diff': diff_save,
-                                                            'hash': block_hash, 'transactions': block_transactions})                        
-                        
+                                                            'hash': block_hash, , 'timestamp': block_timestamp,
+                                                            'miner': miner_address, 'transactions': block_transactions})                        
+
                         for transaction in block_transactions:
                             execute_param(c, "INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (
                                 str(transaction[0]), str(transaction[1]),
@@ -1318,10 +1320,11 @@ def digest_block(data, sdef, peer_ip, conn, c, hdd, h, hdd2, h2, h3):
                         app_log.warning("Block {} valid and saved from {}".format(block_height_new, peer_ip))
 
                         del block_transactions[:]
+                        # This new block may change the int(diff). Trigger the hook wether it changed or not.
+                        diff = difficulty(c)
+                        plugin_manager.execute_action_hook('diff', diff[0])                        
+                        
                         peers.unban(peer_ip)
-                        # peers will test himself. Anyway, unban was only unwarning, not unbanning.
-                        # if peer_ip in warning_list or peer_ip in banlist:
-                        #    unban(peer_ip)
 
                         # whole block validation
 
@@ -1902,12 +1905,15 @@ class ThreadedTCPRequestHandler(socketserver.BaseRequestHandler):
                         connections.send(self.request, results, 10)
                     else:
                         app_log.info("{} not whitelisted for aliasesget command".format(peer_ip))
-
+                # This one is not mandatory, but can prove useful to reindex with minimal db requests
+                elif data == "tokensupdate":
+                    if peers.is_allowed(peer_ip, data):
+                        tokens.tokens_update(index_db, ledger_path_conf, "normal", app_log, plugin_manager)
                 elif data == "tokensget":
                     # if (peer_ip in allowed or "any" in allowed):
 
                     if peers.is_allowed(peer_ip, data):
-                        tokens.tokens_update (index_db, ledger_path_conf, "normal", app_log)
+                        tokens.tokens_update (index_db, ledger_path_conf, "normal", app_log, plugin_manager)
                         tokens_address = connections.receive(self.request, 10)
 
                         index_cursor.execute ("SELECT DISTINCT token FROM tokens WHERE address OR recipient = ?", (tokens_address,))
@@ -2557,7 +2563,7 @@ if __name__ == "__main__":
         index_db = "static/index.db"
 
     app_log.warning("Status: Indexing tokens")
-    tokens.tokens_update(index_db, ledger_path_conf, "normal", app_log)
+    tokens.tokens_update(index_db, ledger_path_conf, "normal", app_log, plugin_manager)
     app_log.warning("Status: Indexing aliases")
     aliases.aliases_update(index_db, ledger_path_conf, "normal", app_log)
 
