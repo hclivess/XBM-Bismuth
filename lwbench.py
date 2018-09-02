@@ -1,9 +1,7 @@
-
 import connections
 import collections
 import socks
 import time
-
 
 
 def convert_ip_port(ip, some_port):
@@ -18,18 +16,17 @@ def convert_ip_port(ip, some_port):
     return ip, some_port
 
 
-                                           
 def time_measure(light_ip, app_log):
     port = 5658
-    result_collection = {ip:[0,0] for ip in light_ip}
-	
+    result_collection = {ip: [0, 0] for ip in light_ip}
+
     for address in result_collection:
         try:
             ip, local_port = convert_ip_port(address, port)
-            print("Attempting to benchmark {}:{}".format (ip, local_port))
+            print("Attempting to benchmark {}:{}".format(ip, local_port))
             s = socks.socksocket()
             s.settimeout(3)
-            
+
             if local_port == 5658: #doesn't work if a node uses non standard port, bench in else-path - will fail
                 #start benchmark
                 timer_start = time.time()                                             
@@ -59,16 +56,14 @@ def time_measure(light_ip, app_log):
                 else:
                     app_log.warning("Result for {}:{}, low load - unmodified: {}".format(ip, local_port, timer_result))
                 result_collection[address] = timer_result, result[8][7]
-                                   
-        except Exception as e:
-            print("Cannot benchmark {}:{}".format (ip, local_port))
-            
 
-    
-    #sort IPs for measured Time
-    bench_result = collections.OrderedDict(sorted((value[0], key) for (key,value) in result_collection.items()))
+        except Exception as e:
+            print("Cannot benchmark {}:{}".format(ip, local_port))
+
+    # sort IPs for measured Time
+    bench_result = collections.OrderedDict(sorted((value[0], key) for (key, value) in result_collection.items()))
     light_ip = list(bench_result.values())
-        	  
+
     max_height_temp = list(result_collection.values())
     max_height = max(list(zip(*max_height_temp))[1])
     for key, value in result_collection.items():
@@ -76,7 +71,6 @@ def time_measure(light_ip, app_log):
             try:
                 light_ip.remove(key)
                 light_ip.append(key)
-                app_log.warning("{}:{} too far behind, sorted last in list".format(ip, local_port))
             except Exception as e:
                 pass
     return light_ip
