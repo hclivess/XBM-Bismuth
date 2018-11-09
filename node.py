@@ -1339,16 +1339,17 @@ def digest_block(data, sdef, peer_ip, conn, c, hdd, h, hdd2, h2, h3, index, inde
 
                 # dev reward
                 if int(block_height_new) % 10 == 0:  # every 10 blocks
-                    execute_param(c, "INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                                  (-block_height_new, str(q_time_now), "Development Reward", str(genesis_conf),
-                                   str(mining_reward), "0", "0", mirror_hash, "0", "0", "0", "0"))
-                    commit(conn)
+                    if db_block_height <= 10000000:
+                        execute_param(c, "INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                                      (-block_height_new, str(q_time_now), "Development Reward", str(genesis_conf),
+                                       str(mining_reward), "0", "0", mirror_hash, "0", "0", "0", "0"))
+                        commit(conn)
 
-                    execute_param(c, "INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                                  (-block_height_new, str(q_time_now), "Hypernode Payouts",
-                                   "3e08b5538a4509d9daa99e01ca5912cda3e98a7f79ca01248c2bde16",
-                                   "8", "0", "0", mirror_hash, "0", "0", "0", "0"))
-                    commit(conn)
+                        execute_param(c, "INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                                      (-block_height_new, str(q_time_now), "Hypernode Payouts",
+                                       "3e08b5538a4509d9daa99e01ca5912cda3e98a7f79ca01248c2bde16",
+                                       "8", "0", "0", mirror_hash, "0", "0", "0", "0"))
+                        commit(conn)
                 # /dev reward
 
                 # app_log.warning("Block: {}: {} valid and saved from {}".format(block_height_new, block_hash[:10], peer_ip))
