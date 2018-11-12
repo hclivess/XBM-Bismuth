@@ -1261,10 +1261,10 @@ def digest_block(data, sdef, peer_ip, conn, c, hdd, h, hdd2, h2, h3, index, inde
                             mining_reward = 15 - (quantize_eight(block_height_new) / quantize_eight(1000000 / 2)) - Decimal("0.8")
                             if mining_reward < 0:
                                 mining_reward = 0
+                            reward = quantize_eight(mining_reward + sum(fees_block[:-1]))
                         else:
                             mining_reward = 0
-
-                        reward = quantize_eight(mining_reward + sum(fees_block[:-1]))
+                            reward = quantize_eight(mining_reward + sum(fees_block[:-1]) * 0.75)
                         # don't request a fee for mined block so new accounts can mine
                         fee = 0
                     else:
@@ -1337,9 +1337,11 @@ def digest_block(data, sdef, peer_ip, conn, c, hdd, h, hdd2, h2, h3, index, inde
                 mirror_hash = blake2b(str(tx_list_to_hash).encode(), digest_size=20).hexdigest()
                 # /new hash
 
+                hn_reward = 0
                 # dev reward
                 if int(block_height_new) % 10 == 0:  # every 10 blocks
                     if db_block_height <= 10000000:
+                        hn_reward = 8
                         execute_param(c, "INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                                       (-block_height_new, str(q_time_now), "Development Reward", str(genesis_conf),
                                        str(mining_reward), "0", "0", mirror_hash, "0", "0", "0", "0"))
@@ -1348,7 +1350,14 @@ def digest_block(data, sdef, peer_ip, conn, c, hdd, h, hdd2, h2, h3, index, inde
                         execute_param(c, "INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                                       (-block_height_new, str(q_time_now), "Hypernode Payouts",
                                        "3e08b5538a4509d9daa99e01ca5912cda3e98a7f79ca01248c2bde16",
-                                       "8", "0", "0", mirror_hash, "0", "0", "0", "0"))
+                                       str(hn_reward), "0", "0", mirror_hash, "0", "0", "0", "0"))
+                        commit(conn)
+                    else:
+                        hn_reward = quantize_eight(sum(fees_block[:-1]) * 0.25)
+                        execute_param(c, "INSERT INTO transactions VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                                      (-block_height_new, str(q_time_now), "Hypernode Payouts",
+                                       "3e08b5538a4509d9daa99e01ca5912cda3e98a7f79ca01248c2bde16",
+                                       str(hn_reward), "0", "0", mirror_hash, "0", "0", "0", "0"))
                         commit(conn)
                 # /dev reward
 
