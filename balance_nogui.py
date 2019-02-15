@@ -22,7 +22,12 @@ key, public_key_readable, private_key_readable, public_key_hashed, address = rea
 
 wallets = []
 
+ """
+Connect to API-Server and get WalletServer status information, 
+sort available Servers for least used and return the sorted list
+"""
 try:
+
     rep = requests.get("http://api.bismuth.live/servers/wallet/legacy.json")
     if rep.status_code == 200:
         wallets = rep.json()
@@ -50,7 +55,10 @@ if wallets:
 else:
     exit("Server or API-Server unreachable, try again in few minutes or ask for help in #support in https://discordapp.com/channels/348020833194868751/392572196855480320")
      
- 
+
+"""
+Connect to WalletServer, send bismuth-API request and stop trying after answer
+"""     
 keep_trying = True
 while keep_trying:
     for ip in light_ip:
