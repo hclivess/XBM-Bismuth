@@ -28,7 +28,7 @@ try:
         wallets = rep.json()
         #print(wallets)
 except Exception as e:
-    print("Error {} getting Server list from API, using lwbench instead".format(e))
+    print("Error {} getting Server list from API".format(e))
 
 
 if wallets:
@@ -48,7 +48,7 @@ if wallets:
         light_ip = ["{}:{}".format(wallet['ip'], wallet['port']) for wallet in sorted_wallets]
 
 else:
-    exit("No Server reachable, try again in few minutes or ask for help in #support in https://discordapp.com/channels/348020833194868751/392572196855480320")
+    exit("Server or API-Server unreachable, try again in few minutes or ask for help in #support in https://discordapp.com/channels/348020833194868751/392572196855480320")
      
  
 keep_trying = True
